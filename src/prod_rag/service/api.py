@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="prod-rag-chunker", version="0.2.0")
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "message": "prod-rag-chunker API is running",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
