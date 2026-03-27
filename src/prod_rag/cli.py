@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import typer
 
@@ -31,6 +30,13 @@ def ask(config: str, query: str):
     pipeline = RAGPipeline(cfg)
     answer = pipeline.ask(query)
     typer.echo(json.dumps(answer.model_dump(), ensure_ascii=False, indent=2))
+
+
+@app.command()
+def serve(host: str = "0.0.0.0", port: int = 8000):
+    import uvicorn
+
+    uvicorn.run("prod_rag.service.api:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

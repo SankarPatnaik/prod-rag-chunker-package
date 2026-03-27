@@ -17,6 +17,7 @@ class TextNormalizer:
 
 
 class StructureParser:
+    PAGE_RE = re.compile(r"^\[\[PAGE_(\d+)\]\]")
     HEADING_PATTERNS = [
         re.compile(r"^(#{1,6})\s+(.+)$"),
         re.compile(r"^((?:\d+\.){1,6}\d*|[A-Z]\.|[IVXLC]+\.)\s+(.+)$"),
@@ -33,50 +34,74 @@ class StructureParser:
         block_type = "body"
         char_pos = 0
         section_start = 0
+        current_page: Optional[int] = None
+        section_page_start: Optional[int] = None
         current_section_id = stable_id(document_id, "0", prefix="sec")
 
         def flush(end_char: int) -> None:
-            nonlocal buffer, section_start, current_section_id, block_type
+            nonlocal buffer, section_start, current_section_id, block_type, section_page_start
             body = "\n".join(buffer).strip()
             if not body:
                 buffer = []
                 section_start = end_char
                 return
-            sections.append(DocumentSection(
-                section_id=current_section_id,
-                heading_path=list(heading_stack),
-                text=body,
-                block_type=block_type,
-                char_start=section_start,
-                char_end=end_char,
-            ))
+            sections.append(
+                DocumentSection(
+                    section_id=current_section_id,
+                    heading_path=list(heading_stack),
+                    text=body,
+                    block_type=block_type,
+                    char_start=section_start,
+                    char_end=end_char,
+                    page_start=section_page_start,
+                    page_end=current_page,
+                )
+            )
             buffer = []
             section_start = end_char
+            section_page_start = current_page
 
         for idx, line in enumerate(lines):
             stripped = line.strip()
             next_char = char_pos + len(line) + 1
+
+            page_match = self.PAGE_RE.match(stripped)
+            if page_match:
+                flush(char_pos)
+                current_page = int(page_match.group(1))
+                section_page_start = current_page
+                current_section_id = stable_id(document_id, f"{idx}-p{current_page}", prefix="sec")
+                block_type = "body"
+                char_pos = next_char
+                continue
+
             heading = self._extract_heading(stripped)
             if heading:
                 flush(char_pos)
                 heading_stack = heading
                 current_section_id = stable_id(document_id, str(idx), prefix="sec")
                 block_type = "heading_section"
+                section_page_start = current_page
                 char_pos = next_char
                 continue
+
             if not stripped:
                 if buffer and buffer[-1] != "":
                     buffer.append("")
                 char_pos = next_char
                 continue
+
             inferred = "body"
             if self.BULLET_RE.search(line):
                 inferred = "list"
             elif self._looks_like_table(line):
                 inferred = "table"
+
             if buffer and inferred != block_type and block_type in {"table", "list"}:
                 flush(char_pos)
                 current_section_id = stable_id(document_id, str(idx), prefix="sec")
+                section_page_start = current_page
+
             block_type = inferred
             buffer.append(line)
             char_pos = next_char
@@ -100,4 +125,6 @@ class StructureParser:
         return None
 
     def _looks_like_table(self, line: str) -> bool:
-        return len(line) >= 12 and bool(self.TABLE_ROW_RE.search(line)) and (sum(ch.isdigit() for ch in line) + line.count("|")) >= 2
+        return len(line) >= 12 and bool(self.TABLE_ROW_RE.search(line)) and (
+            sum(ch.isdigit() for ch in line) + line.count("|")
+        ) >= 2
