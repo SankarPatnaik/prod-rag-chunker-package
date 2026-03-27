@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class ChunkingStrategy(str, Enum):
+    SENTENCE_AWARE = "sentence_aware"
+    SECTION_AWARE = "section_aware"
+    SEMANTIC = "semantic"
+    HIERARCHICAL = "hierarchical"
+    TABLE_AWARE = "table_aware"
 
 
 class DocumentSection(BaseModel):
@@ -13,6 +23,15 @@ class DocumentSection(BaseModel):
     block_type: str = "body"
     char_start: int = 0
     char_end: int = 0
+
+
+class ChunkLineage(BaseModel):
+    source: str
+    document_id: str
+    section_id: str
+    parent_id: Optional[str] = None
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 
 class Chunk(BaseModel):
@@ -68,18 +87,29 @@ class PipelineAnswer(BaseModel):
 
 class ChunkingConfig(BaseModel):
     model_name: str = "small-model"
+    strategy: ChunkingStrategy = ChunkingStrategy.HIERARCHICAL
     max_input_tokens: int = 4096
     reserved_prompt_tokens: int = 700
     reserved_output_tokens: int = 512
     target_chunk_tokens: int = 700
-    min_chunk_tokens: int = 180
+    min_chunk_tokens: int = 120
     overlap_tokens: int = 90
     parent_chunk_target_tokens: int = 1800
     hard_max_chunk_tokens: Optional[int] = None
+    semantic_similarity_threshold: float = 0.72
+    enable_table_isolation: bool = True
+    preserve_section_boundaries: bool = True
+
+    @field_validator("overlap_tokens")
+    @classmethod
+    def validate_overlap(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("overlap_tokens cannot be negative")
+        return value
 
 
 class LoaderConfig(BaseModel):
-    type: Literal["auto", "pdf", "docx", "text"] = "auto"
+    type: Literal["auto", "pdf", "docx", "text", "html", "markdown"] = "auto"
 
 
 class EmbedderConfig(BaseModel):
@@ -121,3 +151,26 @@ class AppConfig(BaseModel):
     vector_store: VectorStoreConfig = VectorStoreConfig()
     llm: LLMConfig = LLMConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
+
+
+class ChunkRequest(BaseModel):
+    document_id: Optional[str] = None
+    source: Optional[str] = None
+    text: Optional[str] = None
+    strategy: Optional[ChunkingStrategy] = None
+
+
+class ChunkMetrics(BaseModel):
+    total_chunks: int
+    avg_tokens: float
+    max_tokens: int
+    min_tokens: int
+
+
+class ChunkResponse(BaseModel):
+    document_id: str
+    child_chunks: List[Chunk]
+    parent_chunks: List[ParentChunk]
+    sections: List[DocumentSection]
+    stats: Dict[str, Any] = Field(default_factory=dict)
+    metrics: ChunkMetrics

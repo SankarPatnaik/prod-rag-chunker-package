@@ -36,7 +36,8 @@ class RAGPipeline:
     def index_document(self, path: str) -> dict:
         loader = get_loader(path, self.config.loader)
         doc = loader.load(path)
-        chunked = self.chunk_pipeline.chunk_document(doc.text, doc.document_id)
+        chunked_response = self.chunk_pipeline.chunk_document(doc.text, doc.document_id, source=str(path))
+        chunked = chunked_response.model_dump()
         child_chunks = chunked["child_chunks"]
         parent_chunks = chunked["parent_chunks"]
 

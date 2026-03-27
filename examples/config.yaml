@@ -2,6 +2,7 @@ loader:
   type: auto
 chunking:
   model_name: mistral
+  strategy: hierarchical
   max_input_tokens: 4096
   reserved_prompt_tokens: 700
   reserved_output_tokens: 512
