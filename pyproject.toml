@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prod-rag-chunker"
+version = "0.1.0"
+description = "Production-ready document loading, chunking, vector indexing, and RAG inference for Llama/Mistral pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "OpenAI"}]
+dependencies = [
+  "pydantic>=2.7",
+  "python-docx>=1.1.0",
+  "pypdf>=4.2.0",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "typer>=0.12",
+  "pyyaml>=6.0",
+  "rank-bm25>=0.2.2",
+]
+
+[project.optional-dependencies]
+faiss = ["faiss-cpu>=1.8.0"]
+qdrant = ["qdrant-client>=1.9.0"]
+embeddings = ["sentence-transformers>=3.0.0", "torch>=2.2"]
+llama_cpp = ["llama-cpp-python>=0.2.79"]
+vllm = ["vllm>=0.5.4"]
+full = [
+  "faiss-cpu>=1.8.0",
+  "qdrant-client>=1.9.0",
+  "sentence-transformers>=3.0.0",
+  "torch>=2.2",
+  "llama-cpp-python>=0.2.79",
+  "vllm>=0.5.4"
+]
+
+[project.scripts]
+prod-rag = "prod_rag.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

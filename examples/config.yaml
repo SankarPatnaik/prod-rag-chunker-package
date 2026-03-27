@@ -1,0 +1,35 @@
+loader:
+  type: auto
+chunking:
+  model_name: mistral
+  max_input_tokens: 4096
+  reserved_prompt_tokens: 700
+  reserved_output_tokens: 512
+  target_chunk_tokens: 700
+  min_chunk_tokens: 180
+  overlap_tokens: 90
+  parent_chunk_target_tokens: 1800
+embedder:
+  model_name: sentence-transformers/all-MiniLM-L6-v2
+  device: cpu
+  batch_size: 16
+vector_store:
+  type: faiss
+  path: .rag_index
+  collection_name: prod_rag_chunks
+  host: localhost
+  port: 6333
+llm:
+  backend: llama_cpp
+  model_path: /path/to/your/model.gguf
+  model_name: null
+  temperature: 0.0
+  max_tokens: 512
+  n_ctx: 4096
+  gpu_layers: 0
+  top_p: 0.95
+retrieval:
+  top_k: 6
+  use_parent_expansion: true
+  parent_expansion_limit: 3
+  use_bm25_fallback: true
