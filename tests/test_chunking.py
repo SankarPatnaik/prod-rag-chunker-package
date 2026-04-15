@@ -25,6 +25,7 @@ def test_table_aware_chunking_preserves_table_header():
     pipeline = ChunkingPipeline(
         ChunkingConfig(
             strategy=ChunkingStrategy.TABLE_AWARE,
+            enable_dynamic_strategy_selection=False,
             target_chunk_tokens=10,
             reserved_prompt_tokens=10,
             reserved_output_tokens=10,
@@ -45,6 +46,7 @@ def test_semantic_strategy_merges_related_chunks():
     pipeline = ChunkingPipeline(
         ChunkingConfig(
             strategy=ChunkingStrategy.SEMANTIC,
+            enable_dynamic_strategy_selection=False,
             target_chunk_tokens=14,
             reserved_prompt_tokens=10,
             reserved_output_tokens=10,
@@ -65,3 +67,27 @@ def test_chunk_metadata_contains_lineage_fields():
     assert first.metadata["source"] == "annual-report.md"
     assert "parent_id" in first.metadata
     assert "token_count" in first.metadata
+    assert first.context_preservation_score > 0.0
+
+
+def test_dynamic_strategy_chooses_legal_clause_aware_for_contract_like_text():
+    text = """
+MASTER SERVICE AGREEMENT
+1. Definitions
+1.1 Affiliate means controlled entity.
+2. Data Protection
+2.1 Provider shall encrypt data at rest.
+Annexure A Compliance Controls.
+"""
+    pipeline = ChunkingPipeline(ChunkingConfig(max_input_tokens=512, reserved_prompt_tokens=10, reserved_output_tokens=10))
+    result = pipeline.chunk_document(text, "legal-1", source="msa.txt")
+    assert result.stats["document_type"] == "legal"
+    assert result.stats["strategy"] == "legal_clause_aware"
+
+
+def test_faq_detection_routes_to_faq_aware_strategy():
+    text = "Q: What is RTO?\nA: Recovery time objective.\nQ: What is RPO?\nA: Recovery point objective."
+    pipeline = ChunkingPipeline(ChunkingConfig(max_input_tokens=512, reserved_prompt_tokens=10, reserved_output_tokens=10))
+    result = pipeline.chunk_document(text, "faq-1")
+    assert result.stats["document_type"] == "faq"
+    assert result.stats["strategy"] == "faq_aware"

@@ -1,0 +1,13 @@
+MASTER SERVICE AGREEMENT
+
+1. Definitions
+1.1 "Affiliate" means any entity controlling, controlled by, or under common control.
+1.2 "Confidential Information" includes technical, financial, and customer records.
+
+2. Data Protection
+2.1 Provider shall implement encryption at rest and in transit.
+2.2 Provider shall notify Customer within 72 hours of any data breach.
+
+Annexure A: Security Controls
+A) Access control logs retained for 365 days.
+B) Quarterly penetration testing reports are mandatory.
