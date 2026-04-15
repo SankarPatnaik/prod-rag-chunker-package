@@ -3,7 +3,10 @@ from __future__ import annotations
 from statistics import mean
 
 from prod_rag.chunking.chunker import HierarchicalChunker
+from prod_rag.chunking.classifier import DocumentTypeClassifier
+from prod_rag.chunking.metadata import ChunkMetadataEnricher
 from prod_rag.chunking.parser import StructureParser, TextNormalizer
+from prod_rag.chunking.strategy_selector import StrategySelector
 from prod_rag.chunking.tokenizer import TokenCounter
 from prod_rag.models import ChunkMetrics, ChunkResponse, ChunkingConfig
 
@@ -13,13 +16,30 @@ class ChunkingPipeline:
         self.config = config
         self.normalizer = TextNormalizer()
         self.parser = StructureParser()
+        self.classifier = DocumentTypeClassifier()
+        self.selector = StrategySelector()
+        self.enricher = ChunkMetadataEnricher()
         self.token_counter = TokenCounter(tokenizer_name=tokenizer_name)
         self.chunker = HierarchicalChunker(self.token_counter, config)
 
-    def chunk_document(self, document_text: str, document_id: str, source: str = "inline") -> ChunkResponse:
+    def chunk_document(self, document_text: str, document_id: str, source: str = "inline", embedding_model: str | None = None) -> ChunkResponse:
         normalized = self.normalizer.normalize(document_text)
         sections = self.parser.parse(document_id=document_id, text=normalized)
-        child_chunks, parent_chunks = self.chunker.chunk_sections(document_id=document_id, source=source, sections=sections)
+        doc_type, signals = self.classifier.classify(normalized, source=source)
+        selected_strategy = self.selector.choose(doc_type, signals, self.config)
+
+        child_chunks, parent_chunks = self.chunker.chunk_sections(
+            document_id=document_id,
+            source=source,
+            sections=sections,
+            strategy=selected_strategy,
+        )
+        child_chunks = self.enricher.enrich(
+            chunks=child_chunks,
+            document_type=doc_type,
+            strategy=selected_strategy,
+            embedding_model=embedding_model,
+        )
 
         token_counts = [c.token_count for c in child_chunks] or [0]
         metrics = ChunkMetrics(
@@ -39,7 +59,17 @@ class ChunkingPipeline:
                 "num_sections": len(sections),
                 "num_child_chunks": len(child_chunks),
                 "num_parent_chunks": len(parent_chunks),
-                "strategy": self.config.strategy.value,
+                "strategy": selected_strategy.value,
+                "document_type": doc_type.value,
+                "signals": {
+                    "heading_frequency": round(signals.heading_frequency, 4),
+                    "table_density": round(signals.table_density, 4),
+                    "code_density": round(signals.code_density, 4),
+                    "citation_density": round(signals.citation_density, 4),
+                    "avg_paragraph_length": round(signals.avg_paragraph_length, 2),
+                    "structural_richness": round(signals.structural_richness, 4),
+                    "token_density": round(signals.token_density, 2),
+                },
             },
             metrics=metrics,
         )

@@ -34,23 +34,39 @@ class HierarchicalChunker:
         hard_cap = self.config.hard_max_chunk_tokens or model_budget
         return min(self.config.target_chunk_tokens, hard_cap, model_budget)
 
-    def chunk_sections(self, document_id: str, source: str, sections: Sequence[DocumentSection]) -> Tuple[List[Chunk], List[ParentChunk]]:
+    def chunk_sections(
+        self,
+        document_id: str,
+        source: str,
+        sections: Sequence[DocumentSection],
+        strategy: ChunkingStrategy | None = None,
+    ) -> Tuple[List[Chunk], List[ParentChunk]]:
         chunks: List[Chunk] = []
         parents: List[ParentChunk] = []
         budget = self.effective_chunk_budget()
         seq = 0
+        strategy = strategy or self.config.strategy
         for section in sections:
-            child = self._chunk_single_section(document_id, source, section, seq, budget)
+            child = self._chunk_single_section(document_id, source, section, seq, budget, strategy)
             seq += len(child)
             chunks.extend(child)
             parents.extend(self._build_parent_chunks(document_id, source, section, child))
+        self._link_parent_references(chunks, parents)
         return chunks, parents
 
-    def _chunk_single_section(self, document_id: str, source: str, section: DocumentSection, start_seq: int, budget: int) -> List[Chunk]:
+    def _chunk_single_section(
+        self,
+        document_id: str,
+        source: str,
+        section: DocumentSection,
+        start_seq: int,
+        budget: int,
+        strategy: ChunkingStrategy,
+    ) -> List[Chunk]:
         if section.block_type == "table" and self.config.enable_table_isolation:
             return self._chunk_table(document_id, source, section, start_seq, budget)
 
-        units = self._units_for_strategy(section.text)
+        units = self._units_for_strategy(section.text, strategy)
         chunks: List[Chunk] = []
         cur: List[str] = []
         cur_tokens = 0
@@ -60,35 +76,47 @@ class HierarchicalChunker:
             unit_tokens = self.token_counter.count(unit)
             if unit_tokens > budget:
                 if cur:
-                    chunks.append(self._make_chunk(document_id, source, section, start_seq + len(chunks), " ".join(cur).strip(), pending_start))
+                    chunks.append(self._make_chunk(document_id, source, section, start_seq + len(chunks), "\n".join(cur).strip(), pending_start))
                     cur, cur_tokens = [], 0
                 chunks.extend(self._split_oversized(document_id, source, section, unit, start_seq + len(chunks), budget))
                 continue
 
             if cur and cur_tokens + unit_tokens > budget:
-                chunk_text = " ".join(cur).strip()
+                chunk_text = "\n".join(cur).strip()
                 chunks.append(self._make_chunk(document_id, source, section, start_seq + len(chunks), chunk_text, pending_start))
                 overlap = self._take_overlap_tail(cur)
-                pending_start = max(section.char_start, pending_start + len(chunk_text) - len(" ".join(overlap)))
+                pending_start = max(section.char_start, pending_start + len(chunk_text) - len("\n".join(overlap)))
                 cur = overlap + [unit]
-                cur_tokens = self.token_counter.count(" ".join(cur))
+                cur_tokens = self.token_counter.count("\n".join(cur))
             else:
                 cur.append(unit)
                 cur_tokens += unit_tokens
 
         if cur:
-            chunks.append(self._make_chunk(document_id, source, section, start_seq + len(chunks), " ".join(cur).strip(), pending_start))
+            chunks.append(self._make_chunk(document_id, source, section, start_seq + len(chunks), "\n".join(cur).strip(), pending_start))
 
         merged = self._merge_tiny_tail(chunks)
-        if self.config.strategy == ChunkingStrategy.SEMANTIC:
+        if strategy == ChunkingStrategy.SEMANTIC:
             return self._semantic_merge(merged, budget)
         return merged
 
-    def _units_for_strategy(self, text: str) -> List[str]:
-        if self.config.strategy in {ChunkingStrategy.SECTION_AWARE, ChunkingStrategy.HIERARCHICAL}:
+    def _units_for_strategy(self, text: str, strategy: ChunkingStrategy) -> List[str]:
+        if strategy in {ChunkingStrategy.SECTION_AWARE, ChunkingStrategy.HIERARCHICAL, ChunkingStrategy.TABLE_AWARE}:
             paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
             if paragraphs:
                 return paragraphs
+        if strategy == ChunkingStrategy.LEGAL_CLAUSE_AWARE:
+            clauses = [p.strip() for p in re.split(r"\n(?=(?:\d+\.\d+|\d+\.|[A-Z]\)|\([a-z]\)))", text) if p.strip()]
+            return clauses or self.splitter.split(text)
+        if strategy == ChunkingStrategy.FAQ_AWARE:
+            qa_blocks = [p.strip() for p in re.split(r"\n(?=(?:Q(?:uestion)?[:\-]|A(?:nswer)?[:\-]))", text, flags=re.IGNORECASE) if p.strip()]
+            return qa_blocks or self.splitter.split(text)
+        if strategy == ChunkingStrategy.CODE_AWARE:
+            blocks = [p for p in re.split(r"\n(?=(?:def\s+|class\s+|function\s+|```))", text) if p.strip()]
+            return blocks or [text]
+        if strategy == ChunkingStrategy.CHAT_AWARE:
+            turns = [p for p in re.split(r"\n(?=(?:\[?\d{1,2}:\d{2}|\w+:))", text) if p.strip()]
+            return turns or self.splitter.split(text)
         return self.splitter.split(text)
 
     def _chunk_table(self, document_id: str, source: str, section: DocumentSection, start_seq: int, budget: int) -> List[Chunk]:
@@ -221,15 +249,24 @@ class HierarchicalChunker:
             metadata={"block_type": section.block_type, "source": source},
         )
 
+    def _link_parent_references(self, chunks: Sequence[Chunk], parents: Sequence[ParentChunk]) -> None:
+        parent_lookup: dict[str, str] = {}
+        for parent in parents:
+            for child_id in parent.child_chunk_ids:
+                parent_lookup[child_id] = parent.parent_chunk_id
+        for chunk in chunks:
+            chunk.parent_chunk_id = parent_lookup.get(chunk.chunk_id)
+
     def _make_chunk(self, document_id: str, source: str, section: DocumentSection, sequence_no: int, text: str, char_start: int) -> Chunk:
         chunk_id = stable_id(document_id, section.section_id, str(sequence_no), text[:80], prefix="c")
+        token_count = self.token_counter.count(text)
         return Chunk(
             chunk_id=chunk_id,
             parent_section_id=section.section_id,
             document_id=document_id,
             heading_path=section.heading_path,
             text=text,
-            token_count=self.token_counter.count(text),
+            token_count=token_count,
             sequence_no=sequence_no,
             page_start=section.page_start,
             page_end=section.page_end,
@@ -242,6 +279,6 @@ class HierarchicalChunker:
                 "block_type": section.block_type,
                 "chunk_id": chunk_id,
                 "parent_id": section.section_id,
-                "token_count": self.token_counter.count(text),
+                "token_count": token_count,
             },
         )

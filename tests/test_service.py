@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-fastapi = pytest.importorskip("fastapi")
+pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from prod_rag.service.api import app

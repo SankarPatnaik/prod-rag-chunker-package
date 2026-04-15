@@ -1,0 +1,16 @@
+{
+  "document_id": "msa-001",
+  "stats": {
+    "document_type": "legal",
+    "strategy": "legal_clause_aware",
+    "num_child_chunks": 3
+  },
+  "child_chunk_example": {
+    "chunk_id": "c_xxx",
+    "section_path": "MASTER SERVICE AGREEMENT > 2. Data Protection",
+    "strategy_used": "legal_clause_aware",
+    "context_preservation_score": 0.86,
+    "semantic_keywords": ["provider", "data", "protection", "customer"],
+    "citation_flag": false
+  }
+}
